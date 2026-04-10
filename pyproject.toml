@@ -46,7 +46,7 @@ _download-model = { cmd = "hf download pablovela5620/dpvo dpvo.pth --repo-type m
 _download-dpvo-data = { cmd = "bash -lc 'hf download pablovela5620/dpvo-example-data movies.zip --repo-type dataset --local-dir . && unzip -o movies.zip -d data/ && rm -f movies.zip && if [ -d data/data/movies ]; then rm -rf data/movies && mv data/data/movies data/movies && rmdir data/data 2>/dev/null || true; fi'", outputs = ["data/movies/IMG_0493.MOV"] }
 _download-iphone-data = { cmd = "hf download pablovela5620/dpvo-example-data pool.MOV --repo-type dataset --local-dir data/iphone/", outputs = ["data/iphone/pool.MOV"] }
 _build-wheel = "python -m build --no-isolation"
-demo = { cmd = "python tools/demo.py --imagedir data/movies/IMG_0493.MOV --config config/fast.yaml", depends-on = ["post-install"] }
+demo = { cmd = "python tools/demo.py --imagedir data/movies/IMG_0493.MOV --config config/fast.yaml", depends-on = ["_post-install"] }
 
 [tool.pixi.tasks._build-native-kernels]
 cmd = "python setup.py build_ext --inplace"
@@ -60,7 +60,7 @@ inputs = [
 ]
 outputs = ["mini_dpvo/_cuda_corr*.so", "mini_dpvo/_cuda_ba*.so"]
 
-[tool.pixi.tasks.post-install]
+[tool.pixi.tasks._post-install]
 cmd = "pwd"
 depends-on = [
     "_build-native-kernels",
@@ -78,14 +78,14 @@ depends-on = [
 [tool.pixi.tasks.app]
 cmd = "python tools/gradio_app.py"
 description = "Run Gradio frontend for mini-dpvo"
-depends-on = ["post-install"]
+depends-on = ["_post-install"]
 
 [tool.pixi.tasks.dev-app]
 cmd = """
     gradio tools/gradio_app.py
     """
 description = "Runs Gradio frontend with hot-reload"
-depends-on = ["post-install"]
+depends-on = ["_post-install"]
 
 
 [tool.pixi.feature.spaces.tasks.spaces-app]
@@ -93,7 +93,7 @@ cmd = """
     python gradio_app.py
     """
 description = "Runs Gradio frontend in huggingface spaces"
-depends-on = ["post-install"]
+depends-on = ["_post-install"]
 
 [tool.pixi.pypi-options]
 no-build-isolation = ["mini-dpvo"]
