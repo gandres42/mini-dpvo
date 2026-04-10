@@ -5400,7 +5400,7 @@ packages:
 - pypi: ./
   name: mini-dpvo
   version: 0.1.1
-  sha256: 93632674a89b6ae948a6dad5c33c6079277c0323c59cce95715d42e121d9bc72
+  sha256: 7febb9a584f8e9834b942a8ca71c9512f30fecb571d3bbaf16c3f08e27406499
   requires_dist:
   - build>=1.2.2.post1,<2
   - mmcv-lite>=2.2.0,<3
