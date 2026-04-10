@@ -2,7 +2,7 @@ import numpy as np
 import os.path as osp
 
 import torch
-from ..lietorch import SE3
+from lietorch import SE3
 
 from scipy.spatial.transform import Rotation
 

@@ -140,7 +140,7 @@ if IN_SPACES:
     run_dpvo = spaces.GPU(run_dpvo)
 
 
-def on_file_upload(video_file_path: str) -> None:
+def on_file_upload(video_file_path: str) -> str:
     video_reader = mmcv.VideoReader(video_file_path)
     video_info = f"""
     **Video Info:**
@@ -220,8 +220,6 @@ with gr.Blocks(
         gr.Examples(
             examples=[[path, *base_example_params] for path in example_video_paths],
             inputs=[video_input, jpg_quality, stride, skip, config_type],
-            outputs=[rr_viewer],
-            fn=run_dpvo,
             cache_examples=False,
         )
 
@@ -229,6 +227,7 @@ with gr.Blocks(
             fn=run_dpvo,
             inputs=[video_input, jpg_quality, stride, skip, config_type],
             outputs=[rr_viewer, time_taken],
+            api_visibility="private",
         )
 
         stop_btn.click(
@@ -239,5 +238,8 @@ with gr.Blocks(
         )
 
         video_input.change(
-            fn=on_file_upload, inputs=[video_input], outputs=[video_info]
+            fn=on_file_upload,
+            inputs=[video_input],
+            outputs=[video_info],
+            api_visibility="private",
         )

@@ -1,5 +1,6 @@
 import torch
-import cuda_corr
+
+from mini_dpvo import _cuda_corr
 
 class CorrLayer(torch.autograd.Function):
     @staticmethod
@@ -8,7 +9,7 @@ class CorrLayer(torch.autograd.Function):
         ctx.save_for_backward(fmap1, fmap2, coords, ii, jj)
         ctx.radius = radius
         ctx.dropout = dropout
-        corr, = cuda_corr.forward(fmap1, fmap2, coords, ii, jj, radius)
+        corr, = _cuda_corr.forward(fmap1, fmap2, coords, ii, jj, radius)
 
         return corr
 
@@ -25,7 +26,7 @@ class CorrLayer(torch.autograd.Function):
             jj = jj[perm]
 
         fmap1_grad, fmap2_grad = \
-            cuda_corr.backward(fmap1, fmap2, coords, ii, jj, grad, ctx.radius)
+            _cuda_corr.backward(fmap1, fmap2, coords, ii, jj, grad, ctx.radius)
 
         return fmap1_grad, fmap2_grad, None, None, None, None, None
 
@@ -37,14 +38,14 @@ class PatchLayer(torch.autograd.Function):
         ctx.radius = radius
         ctx.save_for_backward(net, coords)
         
-        patches, = cuda_corr.patchify_forward(net, coords, radius)
+        patches, = _cuda_corr.patchify_forward(net, coords, radius)
         return patches
 
     @staticmethod
     def backward(ctx, grad):
         """ backward patchify """
         net, coords = ctx.saved_tensors
-        grad, = cuda_corr.patchify_backward(net, coords, grad, ctx.radius)
+        grad, = _cuda_corr.patchify_backward(net, coords, grad, ctx.radius)
 
         return grad, None, None
 
@@ -70,5 +71,4 @@ def patchify(net, coords, radius, mode='bilinear'):
 
 def corr(fmap1, fmap2, coords, ii, jj, radius=1, dropout=1):
     return CorrLayer.apply(fmap1, fmap2, coords, ii, jj, radius, dropout)
-
 
