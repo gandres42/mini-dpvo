@@ -6,7 +6,7 @@ import cv2
 import os
 import os.path as osp
 
-from ..lietorch import SE3
+from lietorch import SE3
 from .base import RGBDDataset
 
 # cur_path = osp.dirname(osp.abspath(__file__))
@@ -106,5 +106,4 @@ class TartanAir(RGBDDataset):
         depth[depth==np.nan] = 1.0
         depth[depth==np.inf] = 1.0
         return depth
-
 

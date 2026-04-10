@@ -1,63 +1,53 @@
-# import os
-import os.path as osp
-from setuptools import setup, find_packages
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+"""Build script for mini_dpvo native CUDA extensions.
 
-ROOT = osp.dirname(osp.abspath(__file__))
+When installed via Pixi, mini-dpvo is treated as a pure-Python package.
+The package's custom CUDA kernels are built explicitly with:
 
-# # Read the EIGEN_INCLUDE_DIR environment variable
-# eigen_include_dir = os.environ.get("EIGEN_INCLUDE_DIR")
-# if eigen_include_dir is None:
-#     raise EnvironmentError(
-#         "EIGEN_INCLUDE_DIR environment variable is not set. "
-#         "Please set it in your .pixi.sh to the path of Eigen's include directory."
-#     )
+    python setup.py build_ext --inplace
 
+inside the activated Pixi environment, while `lietorch` comes from a
+prebuilt conda package.
+"""
 
-setup(
-    name="mini_dpvo",
-    packages=find_packages(include=["mini_dpvo", "mini_dpvo.*"]),
-    package_data={
-        # Include all header files in the 'include' directories
-        "mini_dpvo.lietorch": ["include/*.h"],
-    },
-    ext_modules=[
-        CUDAExtension(
-            "cuda_corr",
-            sources=[
-                "mini_dpvo/altcorr/correlation.cpp",
-                "mini_dpvo/altcorr/correlation_kernel.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"],
-                "nvcc": ["-O3"],
-            },
-        ),
-        CUDAExtension(
-            "cuda_ba",
-            sources=["mini_dpvo/fastba/ba.cpp", "mini_dpvo/fastba/ba_cuda.cu"],
-            extra_compile_args={
-                "cxx": ["-O3"],
-                "nvcc": ["-O3"],
-            },
-        ),
-        CUDAExtension(
-            "lietorch_backends",
-            include_dirs=[
-                osp.join(ROOT, "mini_dpvo/lietorch/include"),
-                # eigen_include_dir,  # Use the environment variable here
-                osp.join(ROOT, ".pixi/envs/default/include/eigen3"),
-            ],
-            sources=[
-                "mini_dpvo/lietorch/src/lietorch.cpp",
-                "mini_dpvo/lietorch/src/lietorch_gpu.cu",
-                "mini_dpvo/lietorch/src/lietorch_cpu.cpp",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"],
-                "nvcc": ["-O3"],
-            },
-        ),
-    ],
-    cmdclass={"build_ext": BuildExtension},
-)
+import os
+import sys
+
+from setuptools import setup
+
+if "build_ext" in sys.argv:
+    import torch
+    from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA not found, cannot compile mini_dpvo native extensions")
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+
+    if not os.environ.get("TORCH_CUDA_ARCH_LIST"):
+        cap = torch.cuda.get_device_capability()
+        arch = f"{cap[0]}.{cap[1]}+PTX"
+        os.environ["TORCH_CUDA_ARCH_LIST"] = arch
+        print(f"Auto-detected CUDA arch: {arch}")
+
+    setup(
+        ext_modules=[
+            CUDAExtension(
+                "mini_dpvo._cuda_corr",
+                sources=[
+                    "mini_dpvo/altcorr/correlation.cpp",
+                    "mini_dpvo/altcorr/correlation_kernel.cu",
+                ],
+                extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
+            ),
+            CUDAExtension(
+                "mini_dpvo._cuda_ba",
+                sources=["mini_dpvo/fastba/ba.cpp", "mini_dpvo/fastba/ba_cuda.cu"],
+                include_dirs=[os.path.join(conda_prefix, "include", "eigen3")],
+                extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
+            ),
+        ],
+        cmdclass={"build_ext": BuildExtension},
+    )
+else:
+    setup()

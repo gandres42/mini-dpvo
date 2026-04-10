@@ -4,16 +4,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from collections import OrderedDict
 
-import torch_scatter
-from torch_scatter import scatter_sum
-
 from . import fastba
 from . import altcorr
-from . import lietorch
-from .lietorch import SE3
+import lietorch
+from lietorch import SE3
 
 from .extractor import BasicEncoder, BasicEncoder4
 from .blocks import GradientClip, GatedResidual, SoftAgg
+from .scatter_utils import scatter_sum
 
 from .utils import *
 from .ba import BA
@@ -267,4 +265,3 @@ class VONet(nn.Module):
             traj.append((valid, coords, coords_gt, Gs[:,:n], Ps[:,:n], kl))
 
         return traj
-

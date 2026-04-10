@@ -19,93 +19,100 @@ dependencies = [
     "hf-transfer>=0.1.8,<0.2",
 ]
 
-[tool.pixi.project]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mini_dpvo", "mini_dpvo.*"]
+namespaces = false
+
+[tool.pixi.workspace]
 name = "mini-dpvo"
 authors = ["pablovela5620 <pablovela5620@gmail.com>"]
 channels = [
-    "nvidia/label/cuda-11.8.0",
-    "nvidia",
+    "https://prefix.dev/ai-demos",
     "conda-forge",
-    "pytorch",
-    "pyg",
+    "nvidia",
 ]
 platforms = ["linux-64"]
 
 [tool.pixi.system-requirements]
 libc = { family = "glibc", version = "2.31" }
+cuda = "12.9"
 
 [tool.pixi.activation]
 scripts = [".pixi.sh"]
 
 [tool.pixi.tasks]
-_download-model = """
-    test -e checkpoints/dpvo.pth
-    || (
-        huggingface-cli download pablovela5620/dpvo dpvo.pth --repo-type model --local-dir checkpoints/
-       )
-"""
-_download-dpvo-data = """
-    test -e data/movies/IMG_0492.MOV
-    || (
-        huggingface-cli download pablovela5620/dpvo-example-data movies.zip --repo-type dataset --local-dir data/
-        && unzip data/movies.zip -d data/
-        && rm -r data/movies.zip
-       )
-"""
+_download-model = { cmd = "hf download pablovela5620/dpvo dpvo.pth --repo-type model --local-dir checkpoints/", outputs = ["checkpoints/dpvo.pth"] }
+_download-dpvo-data = { cmd = "bash -lc 'hf download pablovela5620/dpvo-example-data movies.zip --repo-type dataset --local-dir . && unzip -o movies.zip -d data/ && rm -f movies.zip && if [ -d data/data/movies ]; then rm -rf data/movies && mv data/data/movies data/movies && rmdir data/data 2>/dev/null || true; fi'", outputs = ["data/movies/IMG_0493.MOV"] }
+_download-iphone-data = { cmd = "hf download pablovela5620/dpvo-example-data pool.MOV --repo-type dataset --local-dir data/iphone/", outputs = ["data/iphone/pool.MOV"] }
+_build-wheel = "python -m build --no-isolation"
+demo = { cmd = "python tools/demo.py --imagedir data/movies/IMG_0493.MOV --config config/fast.yaml", depends-on = ["post-install"] }
 
-_download-iphone-data = """
-    test -e data/iphone/pool.MOV
-    || (
-        huggingface-cli download pablovela5620/dpvo-example-data pool.MOV --repo-type dataset --local-dir data/iphone/
-    )
-"""
+[tool.pixi.tasks._build-native-kernels]
+cmd = "python setup.py build_ext --inplace"
+description = "Build mini-dpvo CUDA kernels"
+inputs = [
+    "setup.py",
+    "mini_dpvo/altcorr/*.cpp",
+    "mini_dpvo/altcorr/*.cu",
+    "mini_dpvo/fastba/*.cpp",
+    "mini_dpvo/fastba/*.cu",
+]
+outputs = ["mini_dpvo/_cuda_corr*.so", "mini_dpvo/_cuda_ba*.so"]
 
-post-install = { cmd = "pwd", depends_on = [
+[tool.pixi.tasks.post-install]
+cmd = "pwd"
+depends-on = [
+    "_build-native-kernels",
     "_download-model",
     "_download-dpvo-data",
     "_download-iphone-data",
-] }
+] 
 
-_build-wheel = "python -m build --no-isolation"
-upload-hf = { cmd = "python tools/upload_to_hf.py", depends_on = [
+[tool.pixi.tasks.upload-hf]
+cmd = "python tools/upload_to_hf.py"
+depends-on = [
     "_build-wheel",
-] }
+]
 
-demo = """
-python tools/demo.py --imagedir data/movies/IMG_0493.MOV --config config/fast.yaml
-"""
 [tool.pixi.tasks.app]
 cmd = "python tools/gradio_app.py"
-description = "run gradio frontend for mini-dust3r"
-depends_on = ["post-install"]
+description = "Run Gradio frontend for mini-dpvo"
+depends-on = ["post-install"]
 
 [tool.pixi.tasks.dev-app]
 cmd = """
     gradio tools/gradio_app.py
     """
 description = "Runs Gradio frontend with hot-reload"
-depends_on = ["post-install"]
+depends-on = ["post-install"]
 
 
-[tool.pixi.feature.spaces.tasks.app]
+[tool.pixi.feature.spaces.tasks.spaces-app]
 cmd = """
     python gradio_app.py
     """
 description = "Runs Gradio frontend in huggingface spaces"
-depends_on = ["post-install"]
+depends-on = ["post-install"]
 
 [tool.pixi.pypi-options]
-no-build-isolation = ["mini_dpvo"]
+no-build-isolation = ["mini-dpvo"]
 
 [tool.pixi.dependencies]
 python = "3.11.*"
 pip = ">=24.0,<25"
-cuda = { version = "*", channel = "nvidia/label/cuda-11.8.0" }
-pytorch-cuda = { version = "11.8.*", channel = "pytorch" }
-pytorch = { version = ">=2.2.0,<2.3", channel = "pytorch" }
-torchvision = { version = ">=0.17.0,<0.18", channel = "pytorch" }
+cuda-compiler = "*"
+cuda-version = "12.9.*"
+cuda-cudart-dev = "*"
+cuda-crt = "*"
+libcusparse-dev = "*"
+cuda-driver-dev = "*"
+cuda-nvrtc-dev = "*"
+pytorch-gpu = ">=2.10.0,<2.11"
+torchvision = ">=0.25.0,<0.26"
+cuda-nvcc = "*"
+lietorch = ">=0.3.0"
 plyfile = ">=1.0.3,<1.1"
-pytorch-scatter = { version = "*", channel = "pyg" }
 matplotlib = ">=3.8.4,<3.9"
 yacs = ">=0.1.8,<0.2"
 jaxtyping = ">=0.2.28,<0.3"
@@ -114,10 +121,11 @@ eigen = ">=3.4.0,<3.5"
 tyro = ">=0.8.4,<0.9"
 numpy = "<2.0.0"
 gradio = "<5"
+huggingface_hub = "<1"
 rerun-sdk = ">=0.19.0,<0.20"
 
 [tool.pixi.pypi-dependencies]
-mini_dpvo = { path = ".", editable = true }
+mini-dpvo = { path = ".", editable = true }
 # mini_dpvo = { path = "dist/mini_dpvo-0.1.1-cp311-cp311-linux_x86_64.whl" }
 opencv-python = ">=4.9.0.80"
 evo = ">=1.28.0"

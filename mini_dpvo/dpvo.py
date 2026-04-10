@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from . import fastba
 from . import altcorr
-from . import lietorch
-from .lietorch import SE3
+import lietorch
+from lietorch import SE3
 
 from .net import VONet
 
