@@ -1,7 +1,6 @@
 from mini_dpvo.gradio_ui.dpvo_ui import dpvo_block
-import gradio as gr
 
-with gr.Blocks() as demo:
-    dpvo_block.render()
+demo = dpvo_block
 
-demo.launch()
+if __name__ == "__main__":
+    demo.queue(max_size=2).launch(ssr_mode=False)

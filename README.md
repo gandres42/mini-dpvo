@@ -19,6 +19,8 @@ pixi run post-install
 - `mini-dpvo` now uses the prebuilt `lietorch` package from Pixi instead of building the vendored copy in-tree.
 - `lietorch` is ABI-coupled to the exact PyTorch/libtorch build. If `pixi` upgrades `pytorch` without a matching `lietorch` build, imports will fail with undefined-symbol errors from `lietorch_backends`.
 - The current working combination is driven by `pyproject.toml`/`pixi.lock`; avoid changing `pytorch`, `libtorch`, `torchvision`, or `lietorch` independently.
+- `torch_scatter` was removed from the runtime dependency set and replaced with local scatter helpers implemented with native PyTorch ops in `mini_dpvo/scatter_utils.py` so the project can run on the newer PyTorch stack used here.
+- That `torch_scatter` replacement was done as a compatibility unblocker for the current app/demo workflow and has not been broadly validated outside this path yet.
 - The package still builds its own CUDA extensions (`mini_dpvo._cuda_corr` and `mini_dpvo._cuda_ba`) locally through `pixi run post-install`.
 - Example assets and checkpoints are now fetched through `hf download`, not `huggingface-cli`.
 - `pixi run demo` has been validated on an RTX 5090 with the current lockfile.
