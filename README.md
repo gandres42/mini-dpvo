@@ -1,32 +1,48 @@
 # Mini-DPVO
-A miniature version of [DPVO](https://github.com/princeton-vl/DPVO). Using Rerun viewer, Pixi and Gradio for easy use
+A miniature version of [DPVO](https://github.com/princeton-vl/DPVO). With a Gradio web UI (embedded Rerun viewer), ported to AMD GPUs via ROCm/HIP
 <p align="center">
   <img src="media/mini-dpvo.gif" alt="example output" width="720" />
 </p>
 
 
 ## Installation
-Easily installable via [Pixi](https://pixi.sh/latest/).
+This fork runs on AMD GPUs through ROCm/HIP. The native kernels are compiled at
+install time against the ROCm PyTorch already in your environment, so install
+the prerequisites first:
+
+1. A ROCm build of PyTorch, e.g.
+   `pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm7.14`
+2. A ROCm build of [lietorch](https://github.com/gandres42/lietorch), compiled against
+   that same torch (`pip install --no-build-isolation .` from a recursive clone). Do not
+   use the `lietorch` on PyPI; it is an unrelated CUDA build.
+
+Then install mini-dpvo from a checkout or straight from git:
 ```bash
-git clone https://github.com/pablovela5620/mini-dpvo.git
-cd mini-dpvo
-pixi install
-pixi run post-install
+pip install .
+pip install "git+<repo-url>"
+```
+Extra: `pip install ".[eval]"` for evo-based plotting.
+
+The GPU arch is detected from the first visible GPU. GPUs without official ROCm
+support need the same override at build time and at runtime, e.g. for an RX 6700 XT:
+```bash
+export HSA_OVERRIDE_GFX_VERSION=10.3.0
+```
+With no GPU visible (e.g. inside `docker build`), set `PYTORCH_ROCM_ARCH=gfx1030`
+(or your target) instead.
+
+The DPVO and DUSt3R weights are downloaded from the Hugging Face Hub on first use.
+Optionally fetch the example videos, which the app lists as examples when run from
+the directory containing `data/`:
+```bash
+hf download pablovela5620/dpvo-example-data movies.zip --repo-type dataset --local-dir . && python -m zipfile -e movies.zip . && rm movies.zip
+hf download pablovela5620/dpvo-example-data pool.MOV --repo-type dataset --local-dir data/iphone/
 ```
 
-## Recent Update Notes
-
-- `mini-dpvo` now uses the prebuilt `lietorch` package from Pixi instead of building the vendored copy in-tree.
-- `lietorch` is ABI-coupled to the exact PyTorch/libtorch build. If `pixi` upgrades `pytorch` without a matching `lietorch` build, imports will fail with undefined-symbol errors from `lietorch_backends`.
-- The current working combination is driven by `pyproject.toml`/`pixi.lock`; avoid changing `pytorch`, `libtorch`, `torchvision`, or `lietorch` independently.
-- `torch_scatter` was intentionally removed from the runtime dependency set and replaced with local scatter helpers implemented with native PyTorch ops in `mini_dpvo/scatter_utils.py`.
-- This was not a cleanup preference. It was a compatibility decision required to move `mini-dpvo` onto the newer PyTorch/CUDA stack needed by the prebuilt `lietorch` package and the current 5090-tested environment.
-- In practice: reintroducing `torch_scatter` means re-checking wheel availability and ABI compatibility against the exact `pytorch`/`libtorch`/CUDA combination in this repo. Do not assume a PyPI or PyG wheel will be compatible just because it exists for a nearby Torch/CUDA version.
-- That `torch_scatter` replacement is a narrow compatibility workaround for the current app/demo path and has not been broadly validated outside this workflow yet.
-- The package still builds its own CUDA extensions (`mini_dpvo._cuda_corr` and `mini_dpvo._cuda_ba`) locally through `pixi run post-install`.
-- Example assets and checkpoints are now fetched through `hf download`, not `huggingface-cli`.
-- `pixi run demo` has been validated on an RTX 5090 with the current lockfile.
-- `pixi run rerun` and GUI flows require a valid display session. In headless shells, Rerun will fail unless `DISPLAY`/`XAUTHORITY` are set.
+## Notes
+- The HIP sources are `mini_dpvo/altcorr/correlation_kernel.hip` and `mini_dpvo/fastba/ba_cuda.hip`. The extension modules keep their original names (`mini_dpvo._cuda_corr`, `mini_dpvo._cuda_ba`) because PyTorch exposes ROCm devices through the `torch.cuda` API.
+- `torch` is deliberately not a build requirement. pip's isolated build would fetch the CUDA wheel from PyPI, so the in-tree backend in `build_backend/` lets the build see the torch you already have installed.
+- `torch_scatter` was replaced by native PyTorch helpers in `mini_dpvo/scatter_utils.py` to avoid ABI coupling to a specific torch build.
 
 ## Demo
 Hosted Demos can be found in either lightning studio or huggingface spaces
@@ -38,22 +54,11 @@ Hosted Demos can be found in either lightning studio or huggingface spaces
 <a href='https://huggingface.co/spaces/pablovela5620/MiniDPVO'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue'></a>
 
 
-To run the gradio frontend
+To run the Gradio app locally (then open http://127.0.0.1:7860)
 ```
-pixi run app
+mini-dpvo-app
 ```
-
-To run using just the rerun visualizer
-```
-pixi run rerun
-```
-
-To run the full demo pipeline
-```
-pixi run demo
-```
-
-look in the `pixi.toml` file to see exactly what each command does under `tasks`
+or, from a checkout, `python tools/gradio_app.py`.
 
 
 ## Acknowledgements

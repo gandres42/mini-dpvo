@@ -1,5 +1,6 @@
+#include "hip/hip_runtime.h"
 #include <torch/extension.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/hip/Atomic.cuh>
 #include <vector>
 #include <iostream>
 
@@ -209,7 +210,7 @@ std::vector<torch::Tensor> corr_cuda_forward(
   auto corr = torch::empty({B, M, D, D, H, W}, opts);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(fmap1.scalar_type(), "corr_forward_kernel", ([&] {
-      corr_forward_kernel<scalar_t><<<BLOCKS(B * M * H * W * D * D), THREADS>>>(radius,
+     hipLaunchKernelGGL(( corr_forward_kernel<scalar_t>), dim3(BLOCKS(B * M * H * W * D * D)), dim3(THREADS), 0, 0, radius,
         fmap1.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
         fmap2.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
         coords.packed_accessor32<float,5,torch::RestrictPtrTraits>(),
@@ -271,7 +272,7 @@ std::vector<torch::Tensor> corr_cuda_backward(
   auto fmap2_grad = torch::zeros_like(fmap2);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(fmap1.scalar_type(), "corr_backward_kernel", ([&] {
-    corr_backward_kernel<scalar_t><<<BLOCKS(B * M * H * W * D * D), THREADS>>>(radius,
+   hipLaunchKernelGGL(( corr_backward_kernel<scalar_t>), dim3(BLOCKS(B * M * H * W * D * D)), dim3(THREADS), 0, 0, radius,
       fmap1.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
       fmap2.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
       coords.packed_accessor32<float,5,torch::RestrictPtrTraits>(),
@@ -297,7 +298,7 @@ std::vector<torch::Tensor> patchify_cuda_forward(
   auto patches = torch::zeros({B, M, C, D, D}, opts);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(net.scalar_type(), "patchify_forward_kernel", ([&] {
-      patchify_forward_kernel<scalar_t><<<BLOCKS(B * M * D * D), THREADS>>>(radius,
+     hipLaunchKernelGGL(( patchify_forward_kernel<scalar_t>), dim3(BLOCKS(B * M * D * D)), dim3(THREADS), 0, 0, radius,
         net.packed_accessor32<scalar_t,4,torch::RestrictPtrTraits>(),
         coords.packed_accessor32<float,3,torch::RestrictPtrTraits>(),
         patches.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>());
@@ -323,7 +324,7 @@ std::vector<torch::Tensor> patchify_cuda_backward(
   torch::Tensor net_gradient = torch::zeros_like(net);
   
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(net.scalar_type(), "patchify_backward_kernel", ([&] {
-    patchify_backward_kernel<scalar_t><<<BLOCKS(B * M * D * D), THREADS>>>(radius,
+   hipLaunchKernelGGL(( patchify_backward_kernel<scalar_t>), dim3(BLOCKS(B * M * D * D)), dim3(THREADS), 0, 0, radius,
       gradient.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
       coords.packed_accessor32<float,3,torch::RestrictPtrTraits>(),
       net_gradient.packed_accessor32<scalar_t,4,torch::RestrictPtrTraits>());

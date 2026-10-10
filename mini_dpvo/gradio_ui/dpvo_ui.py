@@ -30,10 +30,13 @@ from multiprocessing import Process, Queue
 from mini_dpvo.dpvo import DPVO
 from jaxtyping import UInt8, Float64, Float32
 from mini_dust3r.model import AsymmetricCroCo3DStereo
+from huggingface_hub import hf_hub_download
 from tqdm import tqdm
 
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+
 if gr.NO_RELOAD:
-    NETWORK_PATH = "checkpoints/dpvo.pth"
+    NETWORK_PATH = hf_hub_download(repo_id="pablovela5620/dpvo", filename="dpvo.pth")
     DEVICE = (
         "mps"
         if torch.backends.mps.is_available()
@@ -59,7 +62,7 @@ def run_dpvo(
     # create a stream to send data back to the rerun viewer
     stream = rr.binary_stream()
     parent_log_path = Path("world")
-    rr.log(f"{parent_log_path}", rr.ViewCoordinates.RDF, timeless=True)
+    rr.log(f"{parent_log_path}", rr.ViewCoordinates.RDF, static=True)
 
     blueprint = rrb.Blueprint(
         collapse_panels=True,
@@ -68,9 +71,9 @@ def run_dpvo(
     rr.send_blueprint(blueprint)
 
     if config_type == "accurate":
-        base_cfg.merge_from_file("config/default.yaml")
+        base_cfg.merge_from_file(str(CONFIG_DIR / "default.yaml"))
     elif config_type == "fast":
-        base_cfg.merge_from_file("config/fast.yaml")
+        base_cfg.merge_from_file(str(CONFIG_DIR / "fast.yaml"))
     else:
         raise ValueError("Invalid config type")
     base_cfg.BUFFER_SIZE = 2048
@@ -81,66 +84,72 @@ def run_dpvo(
 
     reader: Process = create_reader(video_file_path, None, stride, skip, queue)
     reader.start()
+    try:
+        # get the first frame
+        progress(progress=0.1, desc="Estimating Camera Intrinsics")
+        _, bgr_hw3, _ = queue.get()
+        K_33_pred = calib_from_dust3r(bgr_hw3, MODEL, DEVICE)
+        intri_np: Float64[np.ndarray, "4"] = np.array(
+            [K_33_pred[0, 0], K_33_pred[1, 1], K_33_pred[0, 2], K_33_pred[1, 2]]
+        )
 
-    # get the first frame
-    progress(progress=0.1, desc="Estimating Camera Intrinsics")
-    _, bgr_hw3, _ = queue.get()
-    K_33_pred = calib_from_dust3r(bgr_hw3, MODEL, DEVICE)
-    intri_np: Float64[np.ndarray, "4"] = np.array(
-        [K_33_pred[0, 0], K_33_pred[1, 1], K_33_pred[0, 2], K_33_pred[1, 2]]
-    )
+        num_frames = calculate_num_frames(video_file_path, stride, skip)
+        path_list = []
 
-    num_frames = calculate_num_frames(video_file_path, stride, skip)
-    path_list = []
+        with tqdm(total=num_frames, desc="Processing Frames") as pbar:
+            while True:
+                timestep: int
+                bgr_hw3: UInt8[np.ndarray, "h w 3"]
+                intri_np: Float64[np.ndarray, "4"]
+                (timestep, bgr_hw3, _) = queue.get()
+                # queue will have a (-1, image, intrinsics) tuple when the reader is done
+                if timestep < 0:
+                    break
 
-    with tqdm(total=num_frames, desc="Processing Frames") as pbar:
-        while True:
-            timestep: int
-            bgr_hw3: UInt8[np.ndarray, "h w 3"]
-            intri_np: Float64[np.ndarray, "4"]
-            (timestep, bgr_hw3, _) = queue.get()
-            # queue will have a (-1, image, intrinsics) tuple when the reader is done
-            if timestep < 0:
-                break
+                rr.set_time("timestep", sequence=timestep)
 
-            rr.set_time_sequence(timeline="timestep", sequence=timestep)
-
-            bgr_3hw: UInt8[torch.Tensor, "h w 3"] = (
-                torch.from_numpy(bgr_hw3).permute(2, 0, 1).cuda()
-            )
-            intri_torch: Float64[torch.Tensor, "4"] = torch.from_numpy(intri_np).cuda()
-
-            if slam is None:
-                _, h, w = bgr_3hw.shape
-                slam = DPVO(base_cfg, NETWORK_PATH, ht=h, wd=w)
-
-            slam(timestep, bgr_3hw, intri_torch)
-            pbar.update(1)
-
-            if slam.is_initialized:
-                poses: Float32[torch.Tensor, "buffer_size 7"] = slam.poses_
-                points: Float32[torch.Tensor, "buffer_size*num_patches 3"] = (
-                    slam.points_
+                bgr_3hw: UInt8[torch.Tensor, "h w 3"] = (
+                    torch.from_numpy(bgr_hw3).permute(2, 0, 1).cuda()
                 )
-                colors: UInt8[torch.Tensor, "buffer_size num_patches 3"] = slam.colors_
-                path_list = log_trajectory(
-                    parent_log_path,
-                    poses,
-                    points,
-                    colors,
-                    intri_np,
-                    bgr_hw3,
-                    path_list,
-                    jpg_quality,
-                )
-                yield stream.read(), timer() - start_time
+                intri_torch: Float64[torch.Tensor, "4"] = torch.from_numpy(intri_np).cuda()
+
+                if slam is None:
+                    _, h, w = bgr_3hw.shape
+                    slam = DPVO(base_cfg, NETWORK_PATH, ht=h, wd=w)
+
+                slam(timestep, bgr_3hw, intri_torch)
+                pbar.update(1)
+
+                if slam.is_initialized:
+                    poses: Float32[torch.Tensor, "buffer_size 7"] = slam.poses_
+                    points: Float32[torch.Tensor, "buffer_size*num_patches 3"] = (
+                        slam.points_
+                    )
+                    colors: UInt8[torch.Tensor, "buffer_size num_patches 3"] = slam.colors_
+                    path_list = log_trajectory(
+                        parent_log_path,
+                        poses,
+                        points,
+                        colors,
+                        intri_np,
+                        bgr_hw3,
+                        path_list,
+                        jpg_quality,
+                    )
+                    yield stream.read(), timer() - start_time
+    finally:
+        if reader.is_alive():
+            reader.terminate()
+        reader.join()
 
 
 if IN_SPACES:
     run_dpvo = spaces.GPU(run_dpvo)
 
 
-def on_file_upload(video_file_path: str) -> str:
+def on_file_upload(video_file_path: str | None) -> str:
+    if video_file_path is None:
+        return "**Video Info:**"
     video_reader = mmcv.VideoReader(video_file_path)
     video_info = f"""
     **Video Info:**
@@ -151,10 +160,7 @@ def on_file_upload(video_file_path: str) -> str:
     return video_info
 
 
-with gr.Blocks(
-    css=""".gradio-container {margin: 0 !important; min-width: 100%};""",
-    title="Mini-DPVO Demo",
-) as dpvo_block:
+with gr.Blocks(fill_width=True, title="Mini-DPVO Demo") as dpvo_block:
     # scene state is save so that you can change conf_thr, cam_size... without rerunning the inference
     gr.HTML('<h2 style="text-align: center;">Mini-DPVO Demo</h2>')
     gr.HTML(
@@ -201,7 +207,6 @@ with gr.Blocks(
                     label="Config Type: Choose between accurate and fast",
                     value="fast",
                     choices=["accurate", "fast"],
-                    max_choices=1,
                 )
         with gr.Row():
             start_btn = gr.Button("Run")
@@ -243,3 +248,7 @@ with gr.Blocks(
             outputs=[video_info],
             api_visibility="private",
         )
+
+
+def main() -> None:
+    dpvo_block.queue(max_size=2).launch(ssr_mode=False)

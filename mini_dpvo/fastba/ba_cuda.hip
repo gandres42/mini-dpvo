@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 #include <torch/extension.h>
 #include <vector>
 #include <iostream>
@@ -469,7 +470,7 @@ std::vector<torch::Tensor> cuda_ba(
     v = v.view({6*N});
     u = u.view({1*M});
 
-    reprojection_residuals_and_hessian<<<NUM_BLOCKS(ii.size(0)), NUM_THREADS>>>(
+   hipLaunchKernelGGL(( reprojection_residuals_and_hessian), dim3(NUM_BLOCKS(ii.size(0))), dim3(NUM_THREADS), 0, 0, 
       poses.packed_accessor32<float,2,torch::RestrictPtrTraits>(),
       patches.packed_accessor32<float,4,torch::RestrictPtrTraits>(),
       intrinsics.packed_accessor32<float,2,torch::RestrictPtrTraits>(),
@@ -498,7 +499,7 @@ std::vector<torch::Tensor> cuda_ba(
 
       dZ = dZ.view({M});
 
-      patch_retr_kernel<<<NUM_BLOCKS(M), NUM_THREADS>>>(
+     hipLaunchKernelGGL(( patch_retr_kernel), dim3(NUM_BLOCKS(M)), dim3(NUM_THREADS), 0, 0, 
         kx.packed_accessor32<long,1,torch::RestrictPtrTraits>(),
         patches.packed_accessor32<float,4,torch::RestrictPtrTraits>(),
         dZ.packed_accessor32<float,1,torch::RestrictPtrTraits>());
@@ -525,11 +526,11 @@ std::vector<torch::Tensor> cuda_ba(
       dX = dX.view({N, 6});
       dZ = dZ.view({M});
 
-      pose_retr_kernel<<<NUM_BLOCKS(N), NUM_THREADS>>>(t0, t1,
+     hipLaunchKernelGGL(( pose_retr_kernel), dim3(NUM_BLOCKS(N)), dim3(NUM_THREADS), 0, 0, t0, t1,
           poses.packed_accessor32<float,2,torch::RestrictPtrTraits>(),
           dX.packed_accessor32<float,2,torch::RestrictPtrTraits>());
 
-      patch_retr_kernel<<<NUM_BLOCKS(M), NUM_THREADS>>>(
+     hipLaunchKernelGGL(( patch_retr_kernel), dim3(NUM_BLOCKS(M)), dim3(NUM_THREADS), 0, 0, 
           kx.packed_accessor32<long,1,torch::RestrictPtrTraits>(),
           patches.packed_accessor32<float,4,torch::RestrictPtrTraits>(),
           dZ.packed_accessor32<float,1,torch::RestrictPtrTraits>());
@@ -561,7 +562,7 @@ torch::Tensor cuda_reproject(
 
   torch::Tensor coords = torch::empty({N, 2, P, P}, opts);
 
-  reproject<<<NUM_BLOCKS(N), NUM_THREADS>>>(
+ hipLaunchKernelGGL(( reproject), dim3(NUM_BLOCKS(N)), dim3(NUM_THREADS), 0, 0, 
     poses.packed_accessor32<float,2,torch::RestrictPtrTraits>(),
     patches.packed_accessor32<float,4,torch::RestrictPtrTraits>(),
     intrinsics.packed_accessor32<float,2,torch::RestrictPtrTraits>(),

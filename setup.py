@@ -1,53 +1,63 @@
-"""Build script for mini_dpvo native CUDA extensions.
+"""Build script for the mini_dpvo native HIP (ROCm) extensions.
 
-When installed via Pixi, mini-dpvo is treated as a pure-Python package.
-The package's custom CUDA kernels are built explicitly with:
+Package metadata lives in pyproject.toml. The kernels are compiled against the
+ROCm build of PyTorch installed in the target environment, so install torch
+first, then:
 
-    python setup.py build_ext --inplace
+    pip install .
 
-inside the activated Pixi environment, while `lietorch` comes from a
-prebuilt conda package.
+The GPU architecture is taken from PYTORCH_ROCM_ARCH (e.g. "gfx1030") or, if
+unset, from the first visible GPU. That honours HSA_OVERRIDE_GFX_VERSION, so
+build with the same override you run with. Set PYTORCH_ROCM_ARCH when building
+without a GPU (e.g. during `docker build`).
 """
 
 import os
-import sys
 
 from setuptools import setup
 
-if "build_ext" in sys.argv:
+try:
     import torch
     from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+except ImportError as e:
+    raise RuntimeError(
+        "mini-dpvo compiles its kernels against the installed PyTorch; install "
+        "a ROCm build of torch first (https://pytorch.org/get-started/locally/)"
+    ) from e
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA not found, cannot compile mini_dpvo native extensions")
-
-    root = os.path.dirname(os.path.abspath(__file__))
-    conda_prefix = os.environ.get("CONDA_PREFIX", "")
-
-    if not os.environ.get("TORCH_CUDA_ARCH_LIST"):
-        cap = torch.cuda.get_device_capability()
-        arch = f"{cap[0]}.{cap[1]}+PTX"
-        os.environ["TORCH_CUDA_ARCH_LIST"] = arch
-        print(f"Auto-detected CUDA arch: {arch}")
-
-    setup(
-        ext_modules=[
-            CUDAExtension(
-                "mini_dpvo._cuda_corr",
-                sources=[
-                    "mini_dpvo/altcorr/correlation.cpp",
-                    "mini_dpvo/altcorr/correlation_kernel.cu",
-                ],
-                extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
-            ),
-            CUDAExtension(
-                "mini_dpvo._cuda_ba",
-                sources=["mini_dpvo/fastba/ba.cpp", "mini_dpvo/fastba/ba_cuda.cu"],
-                include_dirs=[os.path.join(conda_prefix, "include", "eigen3")],
-                extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
-            ),
-        ],
-        cmdclass={"build_ext": BuildExtension},
+if torch.version.hip is None:
+    raise RuntimeError(
+        f"mini-dpvo requires a ROCm build of PyTorch, found torch {torch.__version__}"
     )
-else:
-    setup()
+
+if not os.environ.get("PYTORCH_ROCM_ARCH"):
+    # Without a visible GPU torch would pass an empty --offload-arch and the
+    # kernels would fail at runtime with "device kernel image is invalid".
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "No ROCm GPU visible to detect the target arch; set PYTORCH_ROCM_ARCH "
+            "(e.g. PYTORCH_ROCM_ARCH=gfx1030)"
+        )
+    # Reflects HSA_OVERRIDE_GFX_VERSION, so the kernels match what the runtime loads.
+    arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+    os.environ["PYTORCH_ROCM_ARCH"] = arch
+    print(f"Auto-detected ROCm arch: {arch}")
+
+setup(
+    ext_modules=[
+        CUDAExtension(
+            "mini_dpvo._cuda_corr",
+            sources=[
+                "mini_dpvo/altcorr/correlation.cpp",
+                "mini_dpvo/altcorr/correlation_kernel.hip",
+            ],
+            extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
+        ),
+        CUDAExtension(
+            "mini_dpvo._cuda_ba",
+            sources=["mini_dpvo/fastba/ba.cpp", "mini_dpvo/fastba/ba_cuda.hip"],
+            extra_compile_args={"cxx": ["-O3"], "nvcc": ["-O3"]},
+        ),
+    ],
+    cmdclass={"build_ext": BuildExtension},
+)

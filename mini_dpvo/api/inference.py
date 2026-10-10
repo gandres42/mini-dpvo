@@ -1,34 +1,21 @@
+"""Helpers for the Gradio demo: frame reading, camera calibration and rerun logging."""
+
 import numpy as np
 import os
 import torch
 from pathlib import Path
 from multiprocessing import Process, Queue
-from yacs.config import CfgNode
 
-from mini_dpvo.utils import Timer
-from mini_dpvo.dpvo import DPVO
 from mini_dpvo.stream import image_stream, video_stream
 
 import rerun as rr
 from jaxtyping import UInt8, Float64, Float32
 from scipy.spatial.transform import Rotation
-from dataclasses import dataclass
-
-from timeit import default_timer as timer
 
 import cv2
 import mmcv
-from tqdm import tqdm
 from mini_dust3r.api import OptimizedResult, inferece_dust3r
 from mini_dust3r.model import AsymmetricCroCo3DStereo
-
-
-@dataclass
-class DPVOPrediction:
-    final_poses: Float32[torch.Tensor, "num_keyframes 7"]
-    tstamps: Float64[torch.Tensor, "num_keyframes"]  # noqa: F821
-    final_points: Float32[torch.Tensor, "buffer_size*num_patches 3"]
-    final_colors: UInt8[torch.Tensor, "buffer_size num_patches 3"]
 
 
 def log_trajectory(
@@ -125,23 +112,6 @@ def log_trajectory(
     return path_list
 
 
-def log_final(
-    parent_log_path: Path,
-    final_poses: Float32[torch.Tensor, "num_keyframes 7"],
-    tstamps: Float64[torch.Tensor, "num_keyframes"],  # noqa: F821
-    final_points: Float32[torch.Tensor, "buffer_size*num_patches 3"],
-    final_colors: UInt8[torch.Tensor, "buffer_size num_patches 3"],
-):
-    for idx, (pose_quat, tstamp) in enumerate(zip(final_poses, tstamps)):
-        cam_log_path = f"{parent_log_path}/camera_{idx}"
-        trans_quat = pose_quat[:3]
-        R_33 = Rotation.from_quat(pose_quat[3:]).as_matrix()
-        rr.log(
-            f"{cam_log_path}",
-            rr.Transform3D(translation=trans_quat, mat3x3=R_33, from_parent=False),
-        )
-
-
 def create_reader(
     imagedir: str, calib: str | None, stride: int, skip: int, queue: Queue
 ) -> Process:
@@ -224,110 +194,3 @@ def calib_from_dust3r(
     K_33_original[1, 2] *= scaling_factor_y  # cy
 
     return K_33_original
-
-
-@torch.no_grad()
-def inference_dpvo(
-    cfg: CfgNode,
-    network_path: str,
-    imagedir: str,
-    calib: str,
-    stride: int = 1,
-    skip: int = 0,
-    timeit: bool = False,
-) -> tuple[DPVOPrediction, float]:
-    slam = None
-    queue = Queue(maxsize=8)
-
-    reader: Process = create_reader(imagedir, calib, stride, skip, queue)
-    reader.start()
-
-    parent_log_path = Path("world")
-    rr.log(f"{parent_log_path}", rr.ViewCoordinates.RDF, timeless=True)
-
-    start = timer()
-    total_frames = calculate_num_frames(imagedir, stride, skip)
-
-    # estimate camera intrinsics if not provided
-    if calib is None:
-        dust3r_device = (
-            "mps"
-            if torch.backends.mps.is_available()
-            else "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
-        )
-        dust3r_model = AsymmetricCroCo3DStereo.from_pretrained(
-            "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt"
-        ).to(dust3r_device)
-        _, bgr_hw3, _ = queue.get()
-        K_33_pred = calib_from_dust3r(bgr_hw3, dust3r_model, dust3r_device)
-        intri_np_dust3r = np.array(
-            [K_33_pred[0, 0], K_33_pred[1, 1], K_33_pred[0, 2], K_33_pred[1, 2]]
-        )
-
-    # path list for visualizing the trajectory
-    path_list = []
-
-    with tqdm(total=total_frames, desc="Processing Frames") as pbar:
-        while True:
-            t: int
-            bgr_hw3: UInt8[np.ndarray, "h w 3"]
-            intri_np: Float64[np.ndarray, "4"]
-            (t, bgr_hw3, intri_np_calib) = queue.get()
-            intri_np = intri_np_calib if calib is not None else intri_np_dust3r
-            # queue will have a (-1, image, intrinsics) tuple when the reader is done
-            if t < 0:
-                break
-
-            rr.set_time_sequence(timeline="timestep", sequence=t)
-
-            bgr_3hw: UInt8[torch.Tensor, "h w 3"] = (
-                torch.from_numpy(bgr_hw3).permute(2, 0, 1).cuda()
-            )
-            intri_torch: Float64[torch.Tensor, "4"] = torch.from_numpy(intri_np).cuda()
-
-            if slam is None:
-                slam = DPVO(cfg, network_path, ht=bgr_3hw.shape[1], wd=bgr_3hw.shape[2])
-
-            with Timer("SLAM", enabled=timeit):
-                slam(t, bgr_3hw, intri_torch)
-
-            if slam.is_initialized:
-                poses: Float32[torch.Tensor, "buffer_size 7"] = slam.poses_
-                points: Float32[torch.Tensor, "buffer_size*num_patches 3"] = (
-                    slam.points_
-                )
-                colors: UInt8[torch.Tensor, "buffer_size num_patches 3"] = slam.colors_
-                path_list = log_trajectory(
-                    parent_log_path=parent_log_path,
-                    poses=poses,
-                    points=points,
-                    colors=colors,
-                    intri_np=intri_np,
-                    bgr_hw3=bgr_hw3,
-                    path_list=path_list,
-                )
-            pbar.update(1)
-
-    for _ in range(12):
-        slam.update()
-
-    total_time: float = timer() - start
-    print(f"Total time: {total_time:.2f}s")
-
-    reader.join()
-
-    final_poses: Float32[torch.Tensor, "num_keyframes 7"]
-    tstamps: Float64[torch.Tensor, "num_keyframes"]  # noqa: F821
-
-    final_poses, tstamps = slam.terminate()
-    final_points: Float32[torch.Tensor, "buffer_size*num_patches 3"] = slam.points_
-    final_colors: UInt8[torch.Tensor, "buffer_size num_patches 3"] = slam.colors_
-    dpvo_pred = DPVOPrediction(
-        final_poses=final_poses,
-        tstamps=tstamps,
-        final_points=final_points,
-        final_colors=final_colors,
-    )
-    return dpvo_pred, total_time
