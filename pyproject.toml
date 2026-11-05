@@ -41,6 +41,7 @@ dependencies = [
     "gradio-rerun==0.38.1",
     "rerun-sdk==0.38.1",
     "typing-extensions<4.16",
+    "packaging<26.1",
 ]
 
 [project.optional-dependencies]
