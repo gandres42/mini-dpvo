@@ -11,15 +11,34 @@ name = "mini-dpvo"
 version = "0.1.1"
 description = "Miniature version of DPVO, focused on inference (ROCm/HIP build)"
 readme = "README.md"
-requires-python = ">=3.10"
+# torch 2.15.0+rocm7.14 ships wheels for CPython 3.11-3.15 only.
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python",
 ]
+# torch/torchvision reference the ROCm wheels on the PyTorch ROCm index
+# (https://download.pytorch.org/whl/rocm7.14) directly, since pyproject
+# metadata can't name an index and PyPI only carries CUDA builds. torch wheels
+# are per-CPython-version, hence one entry per version. If the same version is
+# already installed pip keeps it (it still fetches the wheel, usually from
+# cache, to read its metadata). Keep these in lockstep with the torch install
+# in the devcontainer Dockerfile.
+#
+# The ROCm torch wheel itself depends on `rocm[device-all]==7.14.*`, which only
+# exists on the ROCm index (PyPI's `rocm` is an unrelated 0.1.0 package). So
+# into an environment without ROCm torch already installed, install with
+#   pip install . --extra-index-url https://download.pytorch.org/whl/rocm7.14
+#
 # lietorch is also required but not listed: it must be a ROCm build compiled
 # against the same torch (the PyPI `lietorch` is an unrelated CUDA build).
 dependencies = [
-    "torch",
+    "torch @ https://download-r2.pytorch.org/whl/rocm7.14/torch-2.15.0%2Brocm7.14-cp311-cp311-manylinux_2_28_x86_64.whl ; python_version == '3.11'",
+    "torch @ https://download-r2.pytorch.org/whl/rocm7.14/torch-2.15.0%2Brocm7.14-cp312-cp312-manylinux_2_28_x86_64.whl ; python_version == '3.12'",
+    "torch @ https://download-r2.pytorch.org/whl/rocm7.14/torch-2.15.0%2Brocm7.14-cp313-cp313-manylinux_2_28_x86_64.whl ; python_version == '3.13'",
+    "torch @ https://download-r2.pytorch.org/whl/rocm7.14/torch-2.15.0%2Brocm7.14-cp314-cp314-manylinux_2_28_x86_64.whl ; python_version == '3.14'",
+    "torch @ https://download-r2.pytorch.org/whl/rocm7.14/torch-2.15.0%2Brocm7.14-cp315-cp315-manylinux_2_28_x86_64.whl ; python_version == '3.15'",
+    "torchvision @ https://download-r2.pytorch.org/whl/rocm7.14/torchvision-0.29.2%2Brocm7.14-py3-none-manylinux_2_28_x86_64.whl",
     "numpy",
     "matplotlib",
     "scipy",
