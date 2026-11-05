@@ -5,14 +5,15 @@ A miniature version of [DPVO](https://github.com/princeton-vl/DPVO). With a Grad
 </p>
 
 ## Installation
-This fork runs on AMD GPUs through ROCm/HIP. The native kernels are compiled at install time against the ROCm PyTorch already in your environment, so install the prerequisites first:
+This fork runs on AMD GPUs through ROCm/HIP. The native kernels, including those of the ROCm [lietorch](https://github.com/gandres42/lietorch) fork it depends on, are compiled at install time against the ROCm PyTorch already in your environment, so install that first:
 
-1. A ROCm build of PyTorch, e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm7.14`
-2. A ROCm build of [lietorch](https://github.com/gandres42/lietorch), compiled against that same torch (`pip install --no-build-isolation .` from a recursive clone).
-
-Then install mini-dpvo from a checkout or straight from git:
 ```bash
-pip install .
+pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm7.14
+```
+
+Then install mini-dpvo from a checkout or straight from git. `--no-build-isolation` lets lietorch build against that torch:
+```bash
+pip install --no-build-isolation .
 ```
 Extra: `pip install ".[eval]"` for evo-based plotting.
 
