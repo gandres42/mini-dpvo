@@ -22,6 +22,8 @@ class DPVO:
         self.load_weights(network)
         self.is_initialized = False
         self.enable_timing = False
+        # per-edge post-BA reprojection error in pixels (None until BA has run)
+        self.ba_rproj_error = None
 
         self.n = 0  # number of frames
         self.m = 0  # number of patches
@@ -294,6 +296,10 @@ class DPVO:
                 )
             except:
                 print("Warning BA failed...")
+            else:
+                with torch.no_grad():
+                    post = self.reproject()[..., self.P // 2, self.P // 2]
+                    self.ba_rproj_error = (post - target).norm(dim=-1).flatten()
 
             points = pops.point_cloud(
                 SE3(self.poses),
